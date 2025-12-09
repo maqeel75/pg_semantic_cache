@@ -1,4 +1,4 @@
-# pg_semantic_cache - Pure C Implementation
+# pg_semantic_cache 
 
 **PostgreSQL extension for semantic query result caching using vector embeddings**
 
