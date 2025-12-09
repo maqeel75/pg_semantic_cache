@@ -82,6 +82,31 @@ RETURNS bigint
 AS 'MODULE_PATHNAME', 'auto_evict'
 LANGUAGE C STRICT;
 
+CREATE FUNCTION log_cache_access(
+    query_hash text DEFAULT NULL,
+    cache_hit boolean DEFAULT false,
+    similarity_score float4 DEFAULT NULL,
+    query_cost numeric DEFAULT NULL
+)
+RETURNS void
+AS 'MODULE_PATHNAME', 'log_cache_access'
+LANGUAGE C;
+
+CREATE FUNCTION get_cost_savings(
+    days integer DEFAULT 30
+)
+RETURNS TABLE(
+    total_queries bigint,
+    cache_hits bigint,
+    cache_misses bigint,
+    hit_rate float4,
+    total_cost_saved float8,
+    avg_cost_per_hit float8,
+    total_cost_if_no_cache float8
+)
+AS 'MODULE_PATHNAME', 'get_cost_savings'
+LANGUAGE C;
+
 -- ============================================================================
 -- INITIALIZE SCHEMA
 -- ============================================================================
@@ -93,19 +118,19 @@ SELECT init_schema();
 -- ============================================================================
 
 CREATE VIEW cache_health AS
-SELECT 
-    (SELECT COUNT(*) FROM cache_entries) as total_entries,
-    (SELECT COUNT(*) FROM cache_entries WHERE expires_at <= NOW()) as expired_entries,
-    (SELECT pg_size_pretty(SUM(result_size_bytes)::BIGINT) FROM cache_entries) as total_size,
-    (SELECT AVG(access_count) FROM cache_entries) as avg_access_count,
+SELECT
+    (SELECT COUNT(*) FROM semantic_cache.cache_entries) as total_entries,
+    (SELECT COUNT(*) FROM semantic_cache.cache_entries WHERE expires_at <= NOW()) as expired_entries,
+    (SELECT pg_size_pretty(SUM(result_size_bytes)::BIGINT) FROM semantic_cache.cache_entries) as total_size,
+    (SELECT AVG(access_count) FROM semantic_cache.cache_entries) as avg_access_count,
     m.total_hits,
     m.total_misses,
     ROUND((m.total_hits::NUMERIC / NULLIF(m.total_hits + m.total_misses, 0) * 100)::NUMERIC, 2) as hit_rate_pct
-FROM cache_metadata m
+FROM semantic_cache.cache_metadata m
 WHERE m.id = 1;
 
 CREATE VIEW recent_cache_activity AS
-SELECT 
+SELECT
     id,
     LEFT(query_text, 80) as query_preview,
     access_count,
@@ -113,20 +138,59 @@ SELECT
     last_accessed_at,
     expires_at,
     pg_size_pretty(result_size_bytes::BIGINT) as result_size
-FROM cache_entries
+FROM semantic_cache.cache_entries
 ORDER BY last_accessed_at DESC
 LIMIT 50;
 
 CREATE VIEW cache_by_tag AS
-SELECT 
+SELECT
     UNNEST(tags) as tag,
     COUNT(*) as entry_count,
     pg_size_pretty(SUM(result_size_bytes)::BIGINT) as total_size,
     AVG(access_count) as avg_access_count
-FROM cache_entries
+FROM semantic_cache.cache_entries
 WHERE tags IS NOT NULL
 GROUP BY tag
 ORDER BY entry_count DESC;
+
+-- Logging and cost analysis views
+CREATE VIEW cache_access_summary AS
+SELECT
+    DATE_TRUNC('hour', access_time) as hour,
+    COUNT(*) as total_accesses,
+    SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END) as hits,
+    SUM(CASE WHEN NOT cache_hit THEN 1 ELSE 0 END) as misses,
+    ROUND((SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END)::NUMERIC / COUNT(*)::NUMERIC * 100)::NUMERIC, 2) as hit_rate_pct,
+    ROUND(SUM(cost_saved)::NUMERIC, 6) as cost_saved
+FROM semantic_cache.cache_access_log
+GROUP BY DATE_TRUNC('hour', access_time)
+ORDER BY hour DESC;
+
+CREATE VIEW cost_savings_daily AS
+SELECT
+    DATE(access_time) as date,
+    COUNT(*) as total_queries,
+    SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END) as cache_hits,
+    SUM(CASE WHEN NOT cache_hit THEN 1 ELSE 0 END) as cache_misses,
+    ROUND((SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END)::NUMERIC / COUNT(*)::NUMERIC * 100)::NUMERIC, 2) as hit_rate_pct,
+    ROUND(SUM(cost_saved)::NUMERIC, 6) as total_cost_saved,
+    ROUND(AVG(CASE WHEN cache_hit THEN cost_saved END)::NUMERIC, 6) as avg_cost_per_hit
+FROM semantic_cache.cache_access_log
+GROUP BY DATE(access_time)
+ORDER BY date DESC;
+
+CREATE VIEW top_cached_queries AS
+SELECT
+    query_hash,
+    COUNT(*) as hit_count,
+    AVG(similarity_score) as avg_similarity,
+    ROUND(SUM(cost_saved)::NUMERIC, 6) as total_cost_saved,
+    MAX(access_time) as last_access
+FROM semantic_cache.cache_access_log
+WHERE cache_hit = true
+GROUP BY query_hash
+ORDER BY total_cost_saved DESC
+LIMIT 100;
 
 -- ============================================================================
 -- COMMENTS
@@ -141,11 +205,17 @@ COMMENT ON FUNCTION evict_expired() IS 'Remove expired cache entries';
 COMMENT ON FUNCTION evict_lru(integer) IS 'Evict least recently used entries';
 COMMENT ON FUNCTION clear_cache() IS 'Clear all cache entries';
 COMMENT ON FUNCTION auto_evict() IS 'Automatically evict entries based on cache configuration';
+COMMENT ON FUNCTION log_cache_access(text, boolean, float4, numeric) IS 'Log cache access event with cost information';
+COMMENT ON FUNCTION get_cost_savings(integer) IS 'Get cost savings report for the specified number of days';
 
-COMMENT ON TABLE cache_entries IS 'Stores cached query results with vector embeddings';
-COMMENT ON TABLE cache_metadata IS 'Cache statistics and metadata';
-COMMENT ON TABLE cache_config IS 'Cache configuration settings';
+COMMENT ON TABLE semantic_cache.cache_entries IS 'Stores cached query results with vector embeddings';
+COMMENT ON TABLE semantic_cache.cache_metadata IS 'Cache statistics and metadata';
+COMMENT ON TABLE semantic_cache.cache_config IS 'Cache configuration settings';
+COMMENT ON TABLE semantic_cache.cache_access_log IS 'Logs all cache access events with cost tracking';
 
-COMMENT ON VIEW cache_health IS 'Real-time cache health metrics';
-COMMENT ON VIEW recent_cache_activity IS 'Most recently accessed cache entries';
-COMMENT ON VIEW cache_by_tag IS 'Cache entries grouped by tag';
+COMMENT ON VIEW semantic_cache.cache_health IS 'Real-time cache health metrics';
+COMMENT ON VIEW semantic_cache.recent_cache_activity IS 'Most recently accessed cache entries';
+COMMENT ON VIEW semantic_cache.cache_by_tag IS 'Cache entries grouped by tag';
+COMMENT ON VIEW semantic_cache.cache_access_summary IS 'Hourly cache access statistics with cost savings';
+COMMENT ON VIEW semantic_cache.cost_savings_daily IS 'Daily cost savings breakdown';
+COMMENT ON VIEW semantic_cache.top_cached_queries IS 'Top queries by cost savings';
