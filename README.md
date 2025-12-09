@@ -310,7 +310,7 @@ Contributions welcome! This is a pure C extension using standard PostgreSQL APIs
 
 ## License
 
-MIT or Apache 2.0
+PostgreSQL License
 
 ## Support
 
