@@ -1,0 +1,7 @@
+# pg_semantic_cache extension
+comment = 'Semantic query result caching using vector embeddings'
+default_version = '0.1.0'
+module_pathname = '$libdir/pg_semantic_cache'
+relocatable = false
+requires = 'vector'
+schema = semantic_cache
