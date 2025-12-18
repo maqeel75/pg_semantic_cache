@@ -29,6 +29,7 @@ PG_FUNCTION_INFO_V1(cache_stats);
 PG_FUNCTION_INFO_V1(cache_hit_rate);
 PG_FUNCTION_INFO_V1(evict_expired);
 PG_FUNCTION_INFO_V1(evict_lru);
+PG_FUNCTION_INFO_V1(evict_lfu);
 PG_FUNCTION_INFO_V1(clear_cache);
 PG_FUNCTION_INFO_V1(auto_evict);
 PG_FUNCTION_INFO_V1(log_cache_access);
@@ -147,17 +148,29 @@ cache_query(PG_FUNCTION_ARGS)
 	Datum values[7];
 	char nulls[7];
 	int nargs;
-	
+	size_t result_len;
+
 	query_text = PG_GETARG_TEXT_PP(0);
 	emb_text = PG_GETARG_TEXT_PP(1);
 	result = PG_GETARG_JSONB_P(2);
 	ttl = PG_ARGISNULL(3) ? 3600 : PG_GETARG_INT32(3);
 	has_tags = !PG_ARGISNULL(4);
+
+	/* Validate TTL */
+	if (ttl < 0)
+		elog(ERROR, "cache_query: ttl_seconds must be non-negative");
+	if (ttl > 31536000)  /* 1 year max */
+		elog(ERROR, "cache_query: ttl_seconds exceeds maximum (1 year)");
 	
 	qstr = text_to_cstring(query_text);
 	estr = text_to_cstring(emb_text);
 	rstr = JsonbToCString(NULL, &result->root, VARSIZE(result));
-	
+
+	/* Validate result size */
+	result_len = strlen(rstr);
+	if (result_len > 10485760)  /* 10MB max */
+		elog(ERROR, "cache_query: result_data exceeds maximum size (10MB)");
+
 	qesc = pg_escape_string(qstr);
 	eesc = pg_escape_string(estr);
 	resc = pg_escape_string(rstr);
@@ -255,6 +268,10 @@ get_cached_result(PG_FUNCTION_ARGS)
 	Datum values[4];
 	bool nulls[4];
 	int ret;
+
+	/* Validate similarity threshold */
+	if (threshold < 0.0 || threshold > 1.0)
+		elog(ERROR, "get_cached_result: similarity_threshold must be between 0.0 and 1.0");
 	
 	initStringInfo(&buf);
 	
@@ -333,7 +350,10 @@ cache_stats(PG_FUNCTION_ARGS)
 /* Stub functions */
 Datum invalidate_cache(PG_FUNCTION_ARGS) { PG_RETURN_INT64(0); }
 Datum cache_hit_rate(PG_FUNCTION_ARGS) { PG_RETURN_FLOAT4(0.0); }
-Datum evict_expired(PG_FUNCTION_ARGS) 
+
+/* Evict expired entries */
+Datum
+evict_expired(PG_FUNCTION_ARGS)
 {
 	SPI_connect();
 	execute_sql("DELETE FROM semantic_cache.cache_entries WHERE expires_at <= NOW()");
@@ -341,8 +361,86 @@ Datum evict_expired(PG_FUNCTION_ARGS)
 	SPI_finish();
 	PG_RETURN_INT64(d);
 }
-Datum evict_lru(PG_FUNCTION_ARGS) { PG_RETURN_INT64(0); }
-Datum clear_cache(PG_FUNCTION_ARGS) 
+
+/* Evict Least Recently Used entries */
+Datum
+evict_lru(PG_FUNCTION_ARGS)
+{
+	int32 keep_count;
+	StringInfoData buf;
+	int64 deleted = 0;
+
+	if (PG_ARGISNULL(0))
+		elog(ERROR, "evict_lru: keep_count parameter is required");
+
+	keep_count = PG_GETARG_INT32(0);
+
+	if (keep_count < 0)
+		elog(ERROR, "evict_lru: keep_count must be non-negative");
+
+	if (keep_count > 10000000)  /* 10 million max for safety */
+		elog(ERROR, "evict_lru: keep_count exceeds maximum (10,000,000)");
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"DELETE FROM semantic_cache.cache_entries "
+		"WHERE id NOT IN ("
+		"  SELECT id FROM semantic_cache.cache_entries "
+		"  ORDER BY last_accessed_at DESC "
+		"  LIMIT %d"
+		")",
+		keep_count);
+
+	SPI_connect();
+	execute_sql(buf.data);
+	deleted = SPI_processed;
+	SPI_finish();
+
+	pfree(buf.data);
+	PG_RETURN_INT64(deleted);
+}
+
+/* Evict Least Frequently Used entries */
+Datum
+evict_lfu(PG_FUNCTION_ARGS)
+{
+	int32 keep_count;
+	StringInfoData buf;
+	int64 deleted = 0;
+
+	if (PG_ARGISNULL(0))
+		elog(ERROR, "evict_lfu: keep_count parameter is required");
+
+	keep_count = PG_GETARG_INT32(0);
+
+	if (keep_count < 0)
+		elog(ERROR, "evict_lfu: keep_count must be non-negative");
+
+	if (keep_count > 10000000)  /* 10 million max for safety */
+		elog(ERROR, "evict_lfu: keep_count exceeds maximum (10,000,000)");
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"DELETE FROM semantic_cache.cache_entries "
+		"WHERE id NOT IN ("
+		"  SELECT id FROM semantic_cache.cache_entries "
+		"  ORDER BY access_count DESC, last_accessed_at DESC "
+		"  LIMIT %d"
+		")",
+		keep_count);
+
+	SPI_connect();
+	execute_sql(buf.data);
+	deleted = SPI_processed;
+	SPI_finish();
+
+	pfree(buf.data);
+	PG_RETURN_INT64(deleted);
+}
+
+/* Clear all cache entries */
+Datum
+clear_cache(PG_FUNCTION_ARGS)
 {
 	SPI_connect();
 	execute_sql("DELETE FROM semantic_cache.cache_entries");
@@ -350,6 +448,7 @@ Datum clear_cache(PG_FUNCTION_ARGS)
 	SPI_finish();
 	PG_RETURN_INT64(d);
 }
+
 Datum auto_evict(PG_FUNCTION_ARGS) { PG_RETURN_INT64(0); }
 
 /* Log cache access */

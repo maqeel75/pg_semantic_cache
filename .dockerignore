@@ -1,0 +1,23 @@
+# Ignore build artifacts
+*.o
+*.so
+*.dylib
+*.a
+
+# Ignore macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore test output
+results/
+regression.diffs
+regression.out
+
+# Ignore documentation that's not needed for build
+*.md
+!README.md
