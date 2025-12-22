@@ -1,0 +1,27 @@
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.a
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Test and temporary files
+*.log
+*.tmp
+
+# RAG server test files (not committed)
+test-rag/
+docker-compose.test-rag.yml
+Dockerfile.rag-test
+.env

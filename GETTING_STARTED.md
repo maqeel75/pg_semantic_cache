@@ -151,14 +151,14 @@ def get_cached_or_compute(query):
     # Check cache
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT hit, result_data, similarity_score
+            SELECT found, result_data, similarity_score
             FROM semantic_cache.get_cached_result(
                 %s::text, 0.95, NULL
             )
         """, (embedding_text,))
-        
+
         result = cur.fetchone()
-        
+
         if result and result[0]:  # Cache hit
             print(f"Cache HIT (similarity: {result[2]:.3f})")
             return json.loads(result[1])
@@ -189,17 +189,20 @@ SELECT * FROM semantic_cache.cache_config ORDER BY key;
 ### Update Settings
 
 ```sql
--- Increase cache size to 2GB
-SELECT semantic_cache.set_config('max_cache_size_mb', '2000');
+-- Increase cache size to 2GB (direct SQL update)
+INSERT INTO semantic_cache.cache_config (key, value)
+VALUES ('max_cache_size_mb', '2000')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Set default TTL to 2 hours
-SELECT semantic_cache.set_config('default_ttl_seconds', '7200');
+INSERT INTO semantic_cache.cache_config (key, value)
+VALUES ('default_ttl_seconds', '7200')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Change eviction policy
-SELECT semantic_cache.set_config('eviction_policy', 'lru');  -- or 'lfu', 'ttl'
-
--- Enable auto-eviction
-SELECT semantic_cache.set_config('auto_eviction_enabled', 'true');
+INSERT INTO semantic_cache.cache_config (key, value)
+VALUES ('eviction_policy', 'lru')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 ```
 
 ## Monitoring
@@ -210,10 +213,7 @@ SELECT semantic_cache.set_config('auto_eviction_enabled', 'true');
 -- Comprehensive stats
 SELECT * FROM semantic_cache.cache_stats();
 
--- Just hit rate
-SELECT semantic_cache.cache_hit_rate() || '%' as hit_rate;
-
--- Health overview
+-- Health overview (includes hit rate)
 SELECT * FROM semantic_cache.cache_health;
 
 -- Recent activity
@@ -225,10 +225,10 @@ SELECT * FROM semantic_cache.recent_cache_activity LIMIT 10;
 ```sql
 -- Create monitoring view
 CREATE VIEW cache_dashboard AS
-SELECT 
-    (SELECT cache_hit_rate FROM semantic_cache.cache_stats()) as hit_rate_pct,
+SELECT
+    (SELECT hit_rate_percent FROM semantic_cache.cache_stats()) as hit_rate_pct,
     (SELECT total_entries FROM semantic_cache.cache_stats()) as entries,
-    (SELECT total_size_mb FROM semantic_cache.cache_stats()) as size_mb,
+    (SELECT pg_size_pretty(SUM(result_size_bytes)::BIGINT) FROM semantic_cache.cache_entries) as cache_size,
     (SELECT COUNT(*) FROM semantic_cache.cache_entries WHERE expires_at <= NOW()) as expired_entries,
     NOW() as updated_at;
 
@@ -261,14 +261,14 @@ SELECT * FROM cron.job;
 -- Evict expired entries
 SELECT semantic_cache.evict_expired();
 
--- Evict based on size (keep under 1GB)
-SELECT semantic_cache.evict_lru(1000);  -- 1000 MB limit
+-- Evict entries, keeping only the 1000 most recently used
+SELECT semantic_cache.evict_lru(1000);  -- Keep 1000 entries
 
--- Evict by pattern
-SELECT semantic_cache.invalidate_cache('old_query%', NULL);
+-- Delete entries by pattern (direct SQL)
+DELETE FROM semantic_cache.cache_entries WHERE query_text LIKE 'old_query%';
 
--- Evict by tag
-SELECT semantic_cache.invalidate_cache(NULL, 'deprecated');
+-- Delete entries by tag (direct SQL)
+DELETE FROM semantic_cache.cache_entries WHERE 'deprecated' = ANY(tags);
 
 -- Clear everything (careful!)
 -- SELECT semantic_cache.clear_cache();
