@@ -34,6 +34,11 @@ PG_FUNCTION_INFO_V1(clear_cache);
 PG_FUNCTION_INFO_V1(auto_evict);
 PG_FUNCTION_INFO_V1(log_cache_access);
 PG_FUNCTION_INFO_V1(get_cost_savings);
+PG_FUNCTION_INFO_V1(set_vector_dimension);
+PG_FUNCTION_INFO_V1(get_vector_dimension);
+PG_FUNCTION_INFO_V1(set_index_type);
+PG_FUNCTION_INFO_V1(get_index_type);
+PG_FUNCTION_INFO_V1(rebuild_index);
 
 /* Helper functions */
 static void execute_sql(const char *query)
@@ -80,24 +85,17 @@ pg_escape_string(const char *str)
 Datum
 init_schema(PG_FUNCTION_ARGS)
 {
-	const char *sql =
-		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_entries ("
-		"  id BIGSERIAL PRIMARY KEY,"
-		"  query_hash TEXT NOT NULL UNIQUE,"
-		"  query_text TEXT NOT NULL,"
-		"  query_embedding vector(1536),"
-		"  result_data JSONB NOT NULL,"
-		"  result_size_bytes INTEGER,"
-		"  created_at TIMESTAMPTZ DEFAULT NOW(),"
-		"  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),"
-		"  access_count INTEGER DEFAULT 0,"
-		"  ttl_seconds INTEGER,"
-		"  expires_at TIMESTAMPTZ,"
-		"  tags TEXT[]"
+	int32 dimension = 1536;  /* Default: OpenAI ada-002 */
+	char *index_type = "ivfflat";  /* Default: ivfflat */
+	int ret;
+	bool isnull;
+	StringInfoData buf;
+
+	/* First create config table and metadata tables */
+	const char *base_sql =
+		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_config ("
+		"  key TEXT PRIMARY KEY, value TEXT"
 		");"
-		"CREATE INDEX IF NOT EXISTS idx_cache_embedding "
-		"  ON semantic_cache.cache_entries "
-		"  USING ivfflat (query_embedding vector_cosine_ops) WITH (lists = 100);"
 		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_metadata ("
 		"  id SERIAL PRIMARY KEY,"
 		"  total_hits BIGINT DEFAULT 0,"
@@ -105,9 +103,6 @@ init_schema(PG_FUNCTION_ARGS)
 		"  total_cost_saved NUMERIC(12,6) DEFAULT 0.0"
 		");"
 		"INSERT INTO semantic_cache.cache_metadata (id) VALUES (1) ON CONFLICT (id) DO NOTHING;"
-		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_config ("
-		"  key TEXT PRIMARY KEY, value TEXT"
-		");"
 		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_access_log ("
 		"  id BIGSERIAL PRIMARY KEY,"
 		"  access_time TIMESTAMPTZ DEFAULT NOW(),"
@@ -120,12 +115,90 @@ init_schema(PG_FUNCTION_ARGS)
 		"CREATE INDEX IF NOT EXISTS idx_access_log_time "
 		"  ON semantic_cache.cache_access_log(access_time);"
 		"CREATE INDEX IF NOT EXISTS idx_access_log_hash "
-		"  ON semantic_cache.cache_access_log(query_hash);";
-	
+		"  ON semantic_cache.cache_access_log(query_hash);"
+		"INSERT INTO semantic_cache.cache_config (key, value) "
+		"  VALUES ('vector_dimension', '1536') ON CONFLICT (key) DO NOTHING;"
+		"INSERT INTO semantic_cache.cache_config (key, value) "
+		"  VALUES ('index_type', 'ivfflat') ON CONFLICT (key) DO NOTHING;";
+
 	SPI_connect();
-	execute_sql(sql);
+	execute_sql(base_sql);
+
+	/* Get configured dimension */
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'vector_dimension'",
+		true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			char *dim_str = TextDatumGetCString(val);
+			dimension = atoi(dim_str);
+			pfree(dim_str);
+		}
+	}
+
+	/* Get configured index type */
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'index_type'",
+		true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			index_type = TextDatumGetCString(val);
+		}
+	}
+
+	/* Create cache_entries table with configured dimension */
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"CREATE TABLE IF NOT EXISTS semantic_cache.cache_entries ("
+		"  id BIGSERIAL PRIMARY KEY,"
+		"  query_hash TEXT NOT NULL UNIQUE,"
+		"  query_text TEXT NOT NULL,"
+		"  query_embedding vector(%d),"
+		"  result_data JSONB NOT NULL,"
+		"  result_size_bytes INTEGER,"
+		"  created_at TIMESTAMPTZ DEFAULT NOW(),"
+		"  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),"
+		"  access_count INTEGER DEFAULT 0,"
+		"  ttl_seconds INTEGER,"
+		"  expires_at TIMESTAMPTZ,"
+		"  tags TEXT[]"
+		");",
+		dimension);
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
+	/* Create index with configured type */
+	initStringInfo(&buf);
+
+	if (strcmp(index_type, "hnsw") == 0)
+	{
+		/* HNSW index - more accurate, requires pgvector 0.5.0+ */
+		appendStringInfo(&buf,
+			"CREATE INDEX IF NOT EXISTS idx_cache_embedding "
+			"  ON semantic_cache.cache_entries "
+			"  USING hnsw (query_embedding vector_cosine_ops);");
+	}
+	else
+	{
+		/* IVFFlat index - default, widely supported */
+		appendStringInfo(&buf,
+			"CREATE INDEX IF NOT EXISTS idx_cache_embedding "
+			"  ON semantic_cache.cache_entries "
+			"  USING ivfflat (query_embedding vector_cosine_ops) WITH (lists = 100);");
+	}
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
 	SPI_finish();
-	
+
 	PG_RETURN_VOID();
 }
 
@@ -268,13 +341,72 @@ get_cached_result(PG_FUNCTION_ARGS)
 	Datum values[4];
 	bool nulls[4];
 	int ret;
+	int64 cache_count = 0;
+	int probes = 10;
+	bool isnull;
+	char *index_type = "ivfflat";
 
 	/* Validate similarity threshold */
 	if (threshold < 0.0 || threshold > 1.0)
 		elog(ERROR, "get_cached_result: similarity_threshold must be between 0.0 and 1.0");
-	
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("function returning record called in wrong context")));
+
+	tupdesc = BlessTupleDesc(tupdesc);
+
+	SPI_connect();
+
+	/* Get index type to determine if we need to set probes */
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'index_type'",
+		true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			index_type = TextDatumGetCString(val);
+		}
+	}
+
+	/* Only optimize probes for IVFFlat index */
+	if (strcmp(index_type, "ivfflat") == 0)
+	{
+		/* Get cache size to calculate optimal probes */
+		ret = SPI_execute("SELECT COUNT(*) FROM semantic_cache.cache_entries", true, 0);
+		if (ret == SPI_OK_SELECT && SPI_processed > 0)
+		{
+			Datum count_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+			if (!isnull)
+				cache_count = DatumGetInt64(count_datum);
+		}
+
+		/*
+		 * Dynamic probes calculation:
+		 * - Small cache (<1000): probe 20 lists (high accuracy)
+		 * - Medium cache (1000-10000): probe 10 lists (balanced)
+		 * - Large cache (>10000): probe max(10, lists/10) (scalable)
+		 *
+		 * This ensures we don't miss similar vectors due to approximate search
+		 */
+		if (cache_count < 1000)
+			probes = 20;  /* Small cache: search 20% of lists */
+		else if (cache_count < 10000)
+			probes = 10;  /* Medium cache: search 10% of lists */
+		else
+			probes = 10;  /* Large cache: search 10 lists minimum */
+
+		/* Set probes for this query (session-local) */
+		initStringInfo(&buf);
+		appendStringInfo(&buf, "SET LOCAL ivfflat.probes = %d", probes);
+		execute_sql(buf.data);
+		pfree(buf.data);
+	}
+
+	/* Execute similarity search */
 	initStringInfo(&buf);
-	
 	appendStringInfo(&buf,
 		"SELECT true, result_data, "
 		"       1 - (query_embedding <=> '%s'::vector) as sim, "
@@ -285,16 +417,9 @@ get_cached_result(PG_FUNCTION_ARGS)
 		"ORDER BY query_embedding <=> '%s'::vector "
 		"LIMIT 1",
 		estr, estr, threshold, estr);
-	
-	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("function returning record called in wrong context")));
-	
-	tupdesc = BlessTupleDesc(tupdesc);
-	
-	SPI_connect();
+
 	ret = SPI_execute(buf.data, true, 0);
-	
+
 	if (ret != SPI_OK_SELECT || SPI_processed == 0)
 	{
 		SPI_finish();
@@ -302,20 +427,20 @@ get_cached_result(PG_FUNCTION_ARGS)
 		pfree(buf.data);
 		PG_RETURN_NULL();
 	}
-	
+
 	values[0] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &nulls[0]);
 	values[1] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &nulls[1]);
-	
+
 	/* Fix similarity score extraction */
 	Datum sim_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 3, &nulls[2]);
 	values[2] = Float4GetDatum((float4)DatumGetFloat8(sim_datum));
-	
+
 	values[3] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 4, &nulls[3]);
-	
+
 	SPI_finish();
 	pfree(estr);
 	pfree(buf.data);
-	
+
 	HeapTuple tuple = heap_form_tuple(tupdesc, values, nulls);
 	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
@@ -624,4 +749,237 @@ get_cost_savings(PG_FUNCTION_ARGS)
 
 	HeapTuple tuple = heap_form_tuple(tupdesc, values, nulls);
 	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/* Configure vector dimension (must be called before init_schema or after clearing cache) */
+Datum
+set_vector_dimension(PG_FUNCTION_ARGS)
+{
+	int32 dimension = PG_GETARG_INT32(0);
+	StringInfoData buf;
+
+	/* Validate dimension */
+	if (dimension < 1 || dimension > 16000)
+		elog(ERROR, "set_vector_dimension: dimension must be between 1 and 16000");
+
+	SPI_connect();
+
+	/* Update or insert config */
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"INSERT INTO semantic_cache.cache_config (key, value) "
+		"VALUES ('vector_dimension', '%d') "
+		"ON CONFLICT (key) DO UPDATE SET value = '%d'",
+		dimension, dimension);
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
+	SPI_finish();
+
+	elog(NOTICE, "Vector dimension set to %d. Call rebuild_index() to apply changes.", dimension);
+	PG_RETURN_VOID();
+}
+
+/* Get configured vector dimension */
+Datum
+get_vector_dimension(PG_FUNCTION_ARGS)
+{
+	int32 dimension = 1536;  /* Default: OpenAI ada-002 */
+	int ret;
+	bool isnull;
+
+	SPI_connect();
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'vector_dimension'",
+		true, 0);
+
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			char *dim_str = TextDatumGetCString(val);
+			dimension = atoi(dim_str);
+			pfree(dim_str);
+		}
+	}
+
+	SPI_finish();
+	PG_RETURN_INT32(dimension);
+}
+
+/* Set index type: 'ivfflat' or 'hnsw' */
+Datum
+set_index_type(PG_FUNCTION_ARGS)
+{
+	text *type_text = PG_GETARG_TEXT_PP(0);
+	char *index_type = text_to_cstring(type_text);
+	StringInfoData buf;
+
+	/* Validate index type */
+	if (strcmp(index_type, "ivfflat") != 0 && strcmp(index_type, "hnsw") != 0)
+	{
+		pfree(index_type);
+		elog(ERROR, "set_index_type: index type must be 'ivfflat' or 'hnsw'");
+	}
+
+	SPI_connect();
+
+	/* Update or insert config */
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"INSERT INTO semantic_cache.cache_config (key, value) "
+		"VALUES ('index_type', '%s') "
+		"ON CONFLICT (key) DO UPDATE SET value = '%s'",
+		index_type, index_type);
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
+	SPI_finish();
+	pfree(index_type);
+
+	elog(NOTICE, "Index type set to %s. Call rebuild_index() to apply changes.", text_to_cstring(type_text));
+	PG_RETURN_VOID();
+}
+
+/* Get configured index type */
+Datum
+get_index_type(PG_FUNCTION_ARGS)
+{
+	char *index_type = "ivfflat";  /* Default */
+	int ret;
+	bool isnull;
+
+	SPI_connect();
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'index_type'",
+		true, 0);
+
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			index_type = TextDatumGetCString(val);
+		}
+	}
+
+	SPI_finish();
+	PG_RETURN_TEXT_P(cstring_to_text(index_type));
+}
+
+/* Rebuild index with current configuration */
+Datum
+rebuild_index(PG_FUNCTION_ARGS)
+{
+	int32 dimension = 1536;
+	char *index_type = "ivfflat";
+	int ret;
+	bool isnull;
+	int64 entry_count = 0;
+	StringInfoData buf;
+
+	SPI_connect();
+
+	/* Get current entry count */
+	ret = SPI_execute("SELECT COUNT(*) FROM semantic_cache.cache_entries", true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum count_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+			entry_count = DatumGetInt64(count_datum);
+	}
+
+	/* Get configured dimension */
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'vector_dimension'",
+		true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			char *dim_str = TextDatumGetCString(val);
+			dimension = atoi(dim_str);
+			pfree(dim_str);
+		}
+	}
+
+	/* Get configured index type */
+	ret = SPI_execute(
+		"SELECT value FROM semantic_cache.cache_config WHERE key = 'index_type'",
+		true, 0);
+	if (ret == SPI_OK_SELECT && SPI_processed > 0)
+	{
+		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		if (!isnull)
+		{
+			index_type = TextDatumGetCString(val);
+		}
+	}
+
+	/* Drop existing index */
+	execute_sql("DROP INDEX IF EXISTS semantic_cache.idx_cache_embedding");
+
+	/* Recreate table with new dimension */
+	execute_sql("DROP TABLE IF EXISTS semantic_cache.cache_entries CASCADE");
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+		"CREATE TABLE semantic_cache.cache_entries ("
+		"  id BIGSERIAL PRIMARY KEY,"
+		"  query_hash TEXT NOT NULL UNIQUE,"
+		"  query_text TEXT NOT NULL,"
+		"  query_embedding vector(%d),"
+		"  result_data JSONB NOT NULL,"
+		"  result_size_bytes INTEGER,"
+		"  created_at TIMESTAMPTZ DEFAULT NOW(),"
+		"  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),"
+		"  access_count INTEGER DEFAULT 0,"
+		"  ttl_seconds INTEGER,"
+		"  expires_at TIMESTAMPTZ,"
+		"  tags TEXT[]"
+		")",
+		dimension);
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
+	/* Create index with configured type */
+	initStringInfo(&buf);
+
+	if (strcmp(index_type, "hnsw") == 0)
+	{
+		appendStringInfo(&buf,
+			"CREATE INDEX idx_cache_embedding "
+			"  ON semantic_cache.cache_entries "
+			"  USING hnsw (query_embedding vector_cosine_ops)");
+	}
+	else
+	{
+		/* Calculate optimal lists based on expected cache size */
+		int lists = 100;
+		if (entry_count > 100000)
+			lists = 1000;
+		else if (entry_count > 10000)
+			lists = 200;
+		else if (entry_count < 1000)
+			lists = 10;
+
+		appendStringInfo(&buf,
+			"CREATE INDEX idx_cache_embedding "
+			"  ON semantic_cache.cache_entries "
+			"  USING ivfflat (query_embedding vector_cosine_ops) WITH (lists = %d)",
+			lists);
+	}
+
+	execute_sql(buf.data);
+	pfree(buf.data);
+
+	SPI_finish();
+
+	elog(NOTICE, "Index rebuilt successfully with dimension=%d, type=%s", dimension, index_type);
+	PG_RETURN_VOID();
 }

@@ -119,6 +119,35 @@ AS 'MODULE_PATHNAME', 'get_cost_savings'
 LANGUAGE C;
 
 -- ============================================================================
+-- CONFIGURATION FUNCTIONS
+-- ============================================================================
+
+CREATE FUNCTION set_vector_dimension(dimension integer)
+RETURNS void
+AS 'MODULE_PATHNAME', 'set_vector_dimension'
+LANGUAGE C STRICT;
+
+CREATE FUNCTION get_vector_dimension()
+RETURNS integer
+AS 'MODULE_PATHNAME', 'get_vector_dimension'
+LANGUAGE C STRICT;
+
+CREATE FUNCTION set_index_type(index_type text)
+RETURNS void
+AS 'MODULE_PATHNAME', 'set_index_type'
+LANGUAGE C STRICT;
+
+CREATE FUNCTION get_index_type()
+RETURNS text
+AS 'MODULE_PATHNAME', 'get_index_type'
+LANGUAGE C STRICT;
+
+CREATE FUNCTION rebuild_index()
+RETURNS void
+AS 'MODULE_PATHNAME', 'rebuild_index'
+LANGUAGE C STRICT;
+
+-- ============================================================================
 -- INITIALIZE SCHEMA
 -- ============================================================================
 
@@ -209,7 +238,7 @@ LIMIT 100;
 
 COMMENT ON FUNCTION init_schema() IS 'Initialize cache schema and create required tables';
 COMMENT ON FUNCTION cache_query(text, text, jsonb, integer, text[]) IS 'Cache a query result with its vector embedding';
-COMMENT ON FUNCTION get_cached_result(text, float4, integer) IS 'Retrieve cached result by semantic similarity';
+COMMENT ON FUNCTION get_cached_result(text, float4, integer) IS 'Retrieve cached result by semantic similarity (automatically optimizes IVFFlat probes)';
 COMMENT ON FUNCTION invalidate_cache(text, text) IS 'Invalidate cache entries by pattern or tag';
 COMMENT ON FUNCTION cache_stats() IS 'Get cache statistics including hits, misses, and hit rate';
 COMMENT ON FUNCTION evict_expired() IS 'Remove expired cache entries';
@@ -219,6 +248,11 @@ COMMENT ON FUNCTION clear_cache() IS 'Clear all cache entries';
 COMMENT ON FUNCTION auto_evict() IS 'Automatically evict entries based on cache configuration';
 COMMENT ON FUNCTION log_cache_access(text, boolean, float4, numeric) IS 'Log cache access event with cost information';
 COMMENT ON FUNCTION get_cost_savings(integer) IS 'Get cost savings report for the specified number of days';
+COMMENT ON FUNCTION set_vector_dimension(integer) IS 'Configure vector embedding dimension (768, 1536, etc.) - call rebuild_index() to apply';
+COMMENT ON FUNCTION get_vector_dimension() IS 'Get configured vector embedding dimension';
+COMMENT ON FUNCTION set_index_type(text) IS 'Set vector index type: ivfflat (default, fast) or hnsw (accurate, requires pgvector 0.5.0+) - call rebuild_index() to apply';
+COMMENT ON FUNCTION get_index_type() IS 'Get configured vector index type';
+COMMENT ON FUNCTION rebuild_index() IS 'Rebuild cache table and index with current configuration (WARNING: clears all cached data)';
 
 COMMENT ON TABLE semantic_cache.cache_entries IS 'Stores cached query results with vector embeddings';
 COMMENT ON TABLE semantic_cache.cache_metadata IS 'Cache statistics and metadata';
