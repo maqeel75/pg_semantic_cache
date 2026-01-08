@@ -329,120 +329,26 @@ cache_query(PG_FUNCTION_ARGS)
 	PG_RETURN_INT64(cache_id);
 }
 
-/* Retrieve cached result */
+/*
+ * get_cached_result - REPLACED WITH SQL IMPLEMENTATION
+ *
+ * This function is now implemented in SQL (see sql/pg_semantic_cache--0.3.0.sql)
+ * for better memory management and simpler maintenance.
+ *
+ * Benefits of SQL implementation:
+ * - Avoids complex SPI memory context issues with pass-by-reference types (JSONB)
+ * - Provides identical functionality
+ * - Better performance (no C/SQL boundary overhead)
+ * - Easier to maintain and debug
+ * - No memory corruption issues
+ *
+ * This stub is kept only for the PG_FUNCTION_INFO_V1 declaration but is never called.
+ */
 Datum
 get_cached_result(PG_FUNCTION_ARGS)
 {
-	text *emb_text = PG_GETARG_TEXT_PP(0);
-	float4 threshold = PG_ARGISNULL(1) ? 0.95 : PG_GETARG_FLOAT4(1);
-	char *estr = text_to_cstring(emb_text);
-	StringInfoData buf;
-	TupleDesc tupdesc;
-	Datum values[4];
-	bool nulls[4];
-	int ret;
-	int64 cache_count = 0;
-	int probes = 10;
-	bool isnull;
-	char *index_type = "ivfflat";
-
-	/* Validate similarity threshold */
-	if (threshold < 0.0 || threshold > 1.0)
-		elog(ERROR, "get_cached_result: similarity_threshold must be between 0.0 and 1.0");
-
-	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("function returning record called in wrong context")));
-
-	tupdesc = BlessTupleDesc(tupdesc);
-
-	SPI_connect();
-
-	/* Get index type to determine if we need to set probes */
-	ret = SPI_execute(
-		"SELECT value FROM semantic_cache.cache_config WHERE key = 'index_type'",
-		true, 0);
-	if (ret == SPI_OK_SELECT && SPI_processed > 0)
-	{
-		Datum val = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-		if (!isnull)
-		{
-			index_type = TextDatumGetCString(val);
-		}
-	}
-
-	/* Only optimize probes for IVFFlat index */
-	if (strcmp(index_type, "ivfflat") == 0)
-	{
-		/* Get cache size to calculate optimal probes */
-		ret = SPI_execute("SELECT COUNT(*) FROM semantic_cache.cache_entries", true, 0);
-		if (ret == SPI_OK_SELECT && SPI_processed > 0)
-		{
-			Datum count_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-			if (!isnull)
-				cache_count = DatumGetInt64(count_datum);
-		}
-
-		/*
-		 * Dynamic probes calculation:
-		 * - Small cache (<1000): probe 20 lists (high accuracy)
-		 * - Medium cache (1000-10000): probe 10 lists (balanced)
-		 * - Large cache (>10000): probe max(10, lists/10) (scalable)
-		 *
-		 * This ensures we don't miss similar vectors due to approximate search
-		 */
-		if (cache_count < 1000)
-			probes = 20;  /* Small cache: search 20% of lists */
-		else if (cache_count < 10000)
-			probes = 10;  /* Medium cache: search 10% of lists */
-		else
-			probes = 10;  /* Large cache: search 10 lists minimum */
-
-		/* Set probes for this query (session-local) */
-		initStringInfo(&buf);
-		appendStringInfo(&buf, "SET LOCAL ivfflat.probes = %d", probes);
-		execute_sql(buf.data);
-		pfree(buf.data);
-	}
-
-	/* Execute similarity search */
-	initStringInfo(&buf);
-	appendStringInfo(&buf,
-		"SELECT true, result_data, "
-		"       1 - (query_embedding <=> '%s'::vector) as sim, "
-		"       EXTRACT(EPOCH FROM (NOW() - created_at))::integer as age "
-		"FROM semantic_cache.cache_entries "
-		"WHERE (expires_at IS NULL OR expires_at > NOW()) "
-		"  AND 1 - (query_embedding <=> '%s'::vector) >= %f "
-		"ORDER BY query_embedding <=> '%s'::vector "
-		"LIMIT 1",
-		estr, estr, threshold, estr);
-
-	ret = SPI_execute(buf.data, true, 0);
-
-	if (ret != SPI_OK_SELECT || SPI_processed == 0)
-	{
-		SPI_finish();
-		pfree(estr);
-		pfree(buf.data);
-		PG_RETURN_NULL();
-	}
-
-	values[0] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &nulls[0]);
-	values[1] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &nulls[1]);
-
-	/* Fix similarity score extraction */
-	Datum sim_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 3, &nulls[2]);
-	values[2] = Float4GetDatum((float4)DatumGetFloat8(sim_datum));
-
-	values[3] = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 4, &nulls[3]);
-
-	SPI_finish();
-	pfree(estr);
-	pfree(buf.data);
-
-	HeapTuple tuple = heap_form_tuple(tupdesc, values, nulls);
-	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+	elog(ERROR, "get_cached_result C stub should not be called - using SQL implementation");
+	PG_RETURN_NULL();
 }
 
 /* Get cache statistics */

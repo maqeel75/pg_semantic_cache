@@ -31,6 +31,7 @@ RETURNS bigint
 AS 'MODULE_PATHNAME', 'cache_query'
 LANGUAGE C;
 
+-- Note: Implemented in SQL for better memory management and performance
 CREATE FUNCTION get_cached_result(
     query_embedding text,
     similarity_threshold float4 DEFAULT 0.95,
@@ -42,8 +43,20 @@ RETURNS TABLE(
     similarity_score float4,
     age_seconds integer
 )
-AS 'MODULE_PATHNAME', 'get_cached_result'
-LANGUAGE C;
+LANGUAGE sql STABLE
+AS $$
+    SELECT
+        true::boolean as found,
+        ce.result_data,
+        (1 - (ce.query_embedding <=> query_embedding::vector))::float4 as similarity_score,
+        EXTRACT(EPOCH FROM (NOW() - ce.created_at))::integer as age_seconds
+    FROM semantic_cache.cache_entries ce
+    WHERE (ce.expires_at IS NULL OR ce.expires_at > NOW())
+      AND (1 - (ce.query_embedding <=> query_embedding::vector)) >= similarity_threshold
+      AND (max_age_seconds IS NULL OR EXTRACT(EPOCH FROM (NOW() - ce.created_at)) <= max_age_seconds)
+    ORDER BY ce.query_embedding <=> query_embedding::vector
+    LIMIT 1;
+$$;
 
 CREATE FUNCTION invalidate_cache(
     pattern text DEFAULT NULL,
