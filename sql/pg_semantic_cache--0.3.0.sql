@@ -31,7 +31,7 @@ RETURNS bigint
 AS 'MODULE_PATHNAME', 'cache_query'
 LANGUAGE C;
 
--- Note: Implemented in SQL for better memory management and performance
+-- Note: Implemented in SQL for better memory management and performance with automatic stats tracking
 CREATE FUNCTION get_cached_result(
     query_embedding text,
     similarity_threshold float4 DEFAULT 0.95,
@@ -43,19 +43,46 @@ RETURNS TABLE(
     similarity_score float4,
     age_seconds integer
 )
-LANGUAGE sql STABLE
+LANGUAGE plpgsql
 AS $$
+DECLARE
+    result_record RECORD;
+    query_vec vector := query_embedding::vector;
+BEGIN
+    -- Try to find a cached result
     SELECT
         true::boolean as found,
         ce.result_data,
-        (1 - (ce.query_embedding <=> query_embedding::vector))::float4 as similarity_score,
+        (1 - (ce.query_embedding <=> query_vec))::float4 as similarity_score,
         EXTRACT(EPOCH FROM (NOW() - ce.created_at))::integer as age_seconds
+    INTO result_record
     FROM semantic_cache.cache_entries ce
     WHERE (ce.expires_at IS NULL OR ce.expires_at > NOW())
-      AND (1 - (ce.query_embedding <=> query_embedding::vector)) >= similarity_threshold
+      AND (1 - (ce.query_embedding <=> query_vec)) >= similarity_threshold
       AND (max_age_seconds IS NULL OR EXTRACT(EPOCH FROM (NOW() - ce.created_at)) <= max_age_seconds)
-    ORDER BY ce.query_embedding <=> query_embedding::vector
+    ORDER BY ce.query_embedding <=> query_vec
     LIMIT 1;
+
+    -- Check if we found a result
+    IF result_record.found IS NOT NULL THEN
+        -- Update cache stats for HIT
+        UPDATE semantic_cache.cache_metadata
+        SET total_hits = total_hits + 1
+        WHERE id = 1;
+
+        -- Return the cached result
+        RETURN QUERY SELECT result_record.found, result_record.result_data,
+                           result_record.similarity_score, result_record.age_seconds;
+    ELSE
+        -- Update cache stats for MISS
+        UPDATE semantic_cache.cache_metadata
+        SET total_misses = total_misses + 1
+        WHERE id = 1;
+
+        -- No result found - return nothing
+        RETURN;
+    END IF;
+END;
 $$;
 
 CREATE FUNCTION invalidate_cache(
@@ -66,6 +93,7 @@ RETURNS bigint
 AS 'MODULE_PATHNAME', 'invalidate_cache'
 LANGUAGE C;
 
+-- Note: Implemented in SQL to properly read from cache_metadata table
 CREATE FUNCTION cache_stats()
 RETURNS TABLE(
     total_entries bigint,
@@ -73,8 +101,20 @@ RETURNS TABLE(
     total_misses bigint,
     hit_rate_percent float4
 )
-AS 'MODULE_PATHNAME', 'cache_stats'
-LANGUAGE C STRICT;
+LANGUAGE sql STABLE
+AS $$
+    SELECT
+        (SELECT COUNT(*)::bigint FROM semantic_cache.cache_entries) as total_entries,
+        m.total_hits,
+        m.total_misses,
+        CASE
+            WHEN (m.total_hits + m.total_misses) > 0
+            THEN (m.total_hits::numeric / (m.total_hits + m.total_misses)::numeric * 100)::float4
+            ELSE 0::float4
+        END as hit_rate_percent
+    FROM semantic_cache.cache_metadata m
+    WHERE m.id = 1;
+$$;
 
 CREATE FUNCTION cache_hit_rate()
 RETURNS float4
