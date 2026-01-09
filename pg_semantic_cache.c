@@ -268,7 +268,7 @@ cache_query(PG_FUNCTION_ARGS)
 		/* Prepare with JSONB and tags parameters */
 		argtypes[0] = JSONBOID;
 		argtypes[1] = TEXTARRAYOID;
-		values[0] = PG_GETARG_DATUM(2);  /* Use original JSONB datum */
+		values[0] = JsonbPGetDatum(result);  /* Convert Jsonb* to Datum */
 		values[1] = PG_GETARG_DATUM(4);
 		nulls[0] = ' ';
 		nulls[1] = ' ';
@@ -290,7 +290,7 @@ cache_query(PG_FUNCTION_ARGS)
 
 		/* Prepare with JSONB parameter only */
 		argtypes[0] = JSONBOID;
-		values[0] = PG_GETARG_DATUM(2);  /* Use original JSONB datum */
+		values[0] = JsonbPGetDatum(result);  /* Convert Jsonb* to Datum */
 		nulls[0] = ' ';
 		nargs = 1;
 	}
