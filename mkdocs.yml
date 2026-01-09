@@ -1,0 +1,163 @@
+site_name: pg_semantic_cache
+site_description: Semantic query result caching for PostgreSQL using vector embeddings
+site_author: pgEdge
+site_url: https://docs.pgedge.com/pg_semantic_cache
+
+repo_name: pgEdge/pg_semantic_cache
+repo_url: https://github.com/pgedge/pg_semantic_cache
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2024 pgEdge
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  logo: img/logo.png
+  favicon: img/favicon.ico
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+plugins:
+  - search:
+      lang: en
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+  - minify:
+      minify_html: true
+      minify_js: true
+      minify_css: true
+      htmlmin_opts:
+        remove_comments: true
+      cache_safe: true
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      auto_append:
+        - includes/abbreviations.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/pgedge/pg_semantic_cache
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/pgedge
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/company/pgedge
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Configuration: configuration.md
+  - Usage:
+      - Use Cases: use_cases.md
+      - Monitoring: monitoring.md
+  - Reference:
+      - Functions:
+          - Overview: functions/index.md
+          - Caching:
+              - cache_query: functions/cache_query.md
+              - get_cached_result: functions/get_cached_result.md
+              - invalidate_cache: functions/invalidate_cache.md
+          - Monitoring:
+              - cache_stats: functions/cache_stats.md
+              - cache_hit_rate: functions/cache_hit_rate.md
+          - Eviction:
+              - evict_expired: functions/evict_expired.md
+              - evict_lru: functions/evict_lru.md
+              - evict_lfu: functions/evict_lfu.md
+              - auto_evict: functions/auto_evict.md
+              - clear_cache: functions/clear_cache.md
+          - Configuration:
+              - set_vector_dimension: functions/set_vector_dimension.md
+              - get_vector_dimension: functions/get_vector_dimension.md
+              - set_index_type: functions/set_index_type.md
+              - get_index_type: functions/get_index_type.md
+              - rebuild_index: functions/rebuild_index.md
+          - Cost Tracking:
+              - log_cache_access: functions/log_cache_access.md
+              - get_cost_savings: functions/get_cost_savings.md
+          - Utility:
+              - init_schema: functions/init_schema.md
+  - FAQ: FAQ.md
