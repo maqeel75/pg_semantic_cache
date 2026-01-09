@@ -212,7 +212,7 @@ cache_query(PG_FUNCTION_ARGS)
 	int32 ttl;
 	bool has_tags;
 	char *qstr, *estr, *rstr;
-	char *qesc, *eesc, *resc;
+	char *qesc, *eesc;
 	StringInfoData buf;
 	int ret;
 	int64 cache_id = 0;
@@ -320,7 +320,6 @@ cache_query(PG_FUNCTION_ARGS)
 	pfree(rstr);
 	pfree(qesc);
 	pfree(eesc);
-	pfree(resc);
 	pfree(buf.data);
 	
 	if (cache_id == 0)
