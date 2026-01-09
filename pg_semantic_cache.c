@@ -246,33 +246,30 @@ cache_query(PG_FUNCTION_ARGS)
 
 	qesc = pg_escape_string(qstr);
 	eesc = pg_escape_string(estr);
-	/* Don't escape JSONB - it will be passed as a parameter */
+	/* For JSONB, use dollar quoting to avoid escaping issues */
 
 	initStringInfo(&buf);
 
-	/* Use parameterized query for JSONB and tags */
+	/* Use dollar-quoted strings for JSONB to avoid escaping issues */
 	if (has_tags)
 	{
 		appendStringInfo(&buf,
 			"INSERT INTO semantic_cache.cache_entries "
 			"(query_hash, query_text, query_embedding, result_data, "
 			" result_size_bytes, ttl_seconds, expires_at, tags) "
-			"VALUES (md5(%s), %s, %s::vector, $1, %d, %d, "
-			"NOW() + interval '%d seconds', $2) "
+			"VALUES (md5(%s), %s, %s::vector, $$%s$$::jsonb, %d, %d, "
+			"NOW() + interval '%d seconds', $1) "
 			"ON CONFLICT (query_hash) DO UPDATE SET "
 			"  last_accessed_at = NOW(), "
 			"  access_count = semantic_cache.cache_entries.access_count + 1 "
 			"RETURNING id",
-			qesc, qesc, eesc, (int)strlen(rstr), ttl, ttl);
+			qesc, qesc, eesc, rstr, (int)strlen(rstr), ttl, ttl);
 
-		/* Prepare with JSONB and tags parameters */
-		argtypes[0] = JSONBOID;
-		argtypes[1] = TEXTARRAYOID;
-		values[0] = JsonbPGetDatum(result);  /* Convert Jsonb* to Datum */
-		values[1] = PG_GETARG_DATUM(4);
+		/* Only tags parameter needed */
+		argtypes[0] = TEXTARRAYOID;
+		values[0] = PG_GETARG_DATUM(4);
 		nulls[0] = ' ';
-		nulls[1] = ' ';
-		nargs = 2;
+		nargs = 1;
 	}
 	else
 	{
@@ -280,19 +277,15 @@ cache_query(PG_FUNCTION_ARGS)
 			"INSERT INTO semantic_cache.cache_entries "
 			"(query_hash, query_text, query_embedding, result_data, "
 			" result_size_bytes, ttl_seconds, expires_at) "
-			"VALUES (md5(%s), %s, %s::vector, $1, %d, %d, "
+			"VALUES (md5(%s), %s, %s::vector, $$%s$$::jsonb, %d, %d, "
 			"NOW() + interval '%d seconds') "
 			"ON CONFLICT (query_hash) DO UPDATE SET "
 			"  last_accessed_at = NOW(), "
 			"  access_count = semantic_cache.cache_entries.access_count + 1 "
 			"RETURNING id",
-			qesc, qesc, eesc, (int)strlen(rstr), ttl, ttl);
+			qesc, qesc, eesc, rstr, (int)strlen(rstr), ttl, ttl);
 
-		/* Prepare with JSONB parameter only */
-		argtypes[0] = JSONBOID;
-		values[0] = JsonbPGetDatum(result);  /* Convert Jsonb* to Datum */
-		nulls[0] = ' ';
-		nargs = 1;
+		nargs = 0;
 	}
 	
 	if (SPI_connect() != SPI_OK_CONNECT)
