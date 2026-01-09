@@ -246,30 +246,33 @@ cache_query(PG_FUNCTION_ARGS)
 
 	qesc = pg_escape_string(qstr);
 	eesc = pg_escape_string(estr);
-	resc = pg_escape_string(rstr);
-	
+	/* Don't escape JSONB - it will be passed as a parameter */
+
 	initStringInfo(&buf);
-	
-	/* Use parameterized query for tags */
+
+	/* Use parameterized query for JSONB and tags */
 	if (has_tags)
 	{
 		appendStringInfo(&buf,
 			"INSERT INTO semantic_cache.cache_entries "
 			"(query_hash, query_text, query_embedding, result_data, "
 			" result_size_bytes, ttl_seconds, expires_at, tags) "
-			"VALUES (md5(%s), %s, %s::vector, %s::jsonb, %d, %d, "
-			"NOW() + interval '%d seconds', $1) "
+			"VALUES (md5(%s), %s, %s::vector, $1, %d, %d, "
+			"NOW() + interval '%d seconds', $2) "
 			"ON CONFLICT (query_hash) DO UPDATE SET "
 			"  last_accessed_at = NOW(), "
 			"  access_count = semantic_cache.cache_entries.access_count + 1 "
 			"RETURNING id",
-			qesc, qesc, eesc, resc, (int)strlen(rstr), ttl, ttl);
-		
-		/* Prepare with tags parameter */
-		argtypes[0] = TEXTARRAYOID;
-		values[0] = PG_GETARG_DATUM(4);
+			qesc, qesc, eesc, (int)strlen(rstr), ttl, ttl);
+
+		/* Prepare with JSONB and tags parameters */
+		argtypes[0] = JSONBOID;
+		argtypes[1] = TEXTARRAYOID;
+		values[0] = PointerGetDatum(result);
+		values[1] = PG_GETARG_DATUM(4);
 		nulls[0] = ' ';
-		nargs = 1;
+		nulls[1] = ' ';
+		nargs = 2;
 	}
 	else
 	{
@@ -277,15 +280,19 @@ cache_query(PG_FUNCTION_ARGS)
 			"INSERT INTO semantic_cache.cache_entries "
 			"(query_hash, query_text, query_embedding, result_data, "
 			" result_size_bytes, ttl_seconds, expires_at) "
-			"VALUES (md5(%s), %s, %s::vector, %s::jsonb, %d, %d, "
+			"VALUES (md5(%s), %s, %s::vector, $1, %d, %d, "
 			"NOW() + interval '%d seconds') "
 			"ON CONFLICT (query_hash) DO UPDATE SET "
 			"  last_accessed_at = NOW(), "
 			"  access_count = semantic_cache.cache_entries.access_count + 1 "
 			"RETURNING id",
-			qesc, qesc, eesc, resc, (int)strlen(rstr), ttl, ttl);
-		
-		nargs = 0;
+			qesc, qesc, eesc, (int)strlen(rstr), ttl, ttl);
+
+		/* Prepare with JSONB parameter only */
+		argtypes[0] = JSONBOID;
+		values[0] = PointerGetDatum(result);
+		nulls[0] = ' ';
+		nargs = 1;
 	}
 	
 	if (SPI_connect() != SPI_OK_CONNECT)
