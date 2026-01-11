@@ -47,9 +47,10 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     result_record RECORD;
+    closest_match RECORD;
     query_vec vector := query_embedding::vector;
 BEGIN
-    -- Try to find a cached result
+    -- Try to find a cached result that meets the threshold
     SELECT
         true::boolean as found,
         ce.result_data,
@@ -79,8 +80,22 @@ BEGIN
         SET total_misses = total_misses + 1
         WHERE id = 1;
 
-        -- No result found - return nothing
-        RETURN;
+        -- Find the closest match (even if below threshold) to show similarity
+        SELECT
+            (1 - (ce.query_embedding <=> query_vec))::float4 as similarity_score
+        INTO closest_match
+        FROM semantic_cache.cache_entries ce
+        WHERE (ce.expires_at IS NULL OR ce.expires_at > NOW())
+          AND (max_age_seconds IS NULL OR EXTRACT(EPOCH FROM (NOW() - ce.created_at)) <= max_age_seconds)
+        ORDER BY ce.query_embedding <=> query_vec
+        LIMIT 1;
+
+        -- Return miss result with closest match similarity (or 0.0 if no entries)
+        RETURN QUERY SELECT
+            false::boolean as found,
+            NULL::jsonb as result_data,
+            COALESCE(closest_match.similarity_score, 0.0)::float4 as similarity_score,
+            NULL::integer as age_seconds;
     END IF;
 END;
 $$;
