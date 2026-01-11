@@ -81,6 +81,9 @@ BEGIN
         WHERE id = 1;
 
         -- Find the closest match (even if below threshold) to show similarity
+        -- Note: Disable index scan because IVFFlat doesn't work well with small datasets
+        PERFORM set_config('enable_indexscan', 'off', true);
+
         SELECT
             (1 - (ce.query_embedding <=> query_vec))::float4 as similarity_score
         INTO closest_match
@@ -89,6 +92,9 @@ BEGIN
           AND (max_age_seconds IS NULL OR EXTRACT(EPOCH FROM (NOW() - ce.created_at)) <= max_age_seconds)
         ORDER BY ce.query_embedding <=> query_vec
         LIMIT 1;
+
+        -- Re-enable index scan for subsequent queries
+        PERFORM set_config('enable_indexscan', 'on', true);
 
         -- Return miss result with closest match similarity (or 0.0 if no entries)
         RETURN QUERY SELECT
