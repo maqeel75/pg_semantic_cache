@@ -1,0 +1,12 @@
+# Minimal RAG server configuration for testing
+server:
+  port: 8080
+  host: 0.0.0.0
+
+cache:
+  enabled: true
+  similarity_threshold: 0.95
+  ttl_seconds: 3600
+
+# Note: Database connection is configured via environment variables
+# See docker-compose.test-rag.yml for configuration
