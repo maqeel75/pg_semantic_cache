@@ -15,7 +15,7 @@ COPY . .
 RUN make clean && make && make install
 
 # Initialize database and run tests
-COPY docker-entrypoint-test.sh /usr/local/bin/
+COPY testing/docker/docker-entrypoint-test.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint-test.sh
 
 CMD ["/usr/local/bin/docker-entrypoint-test.sh"]

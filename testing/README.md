@@ -30,21 +30,25 @@ testing/
 
 ### Docker-based Testing
 
+**Note:** All scripts must be run from the project root directory.
+
 ```bash
-# Run basic extension tests
-cd testing/scripts
-./docker-test.sh
+# From project root
+./testing/scripts/docker-test.sh
 
 # Run debug tests
-./debug-test.sh
+./testing/scripts/debug-test.sh
+
+# Run test plan locally (requires PostgreSQL installed)
+./testing/scripts/TEST_PLAN.sh
 ```
 
-### Manual Testing
+### Docker Compose (RAG Integration)
 
 ```bash
-# Run test plan locally (requires PostgreSQL installed)
-cd testing/scripts
-./TEST_PLAN.sh
+# From testing/docker/ directory
+cd testing/docker
+docker-compose -f docker-compose.test-rag.yml up
 ```
 
 ### RAG Integration Testing
@@ -75,8 +79,8 @@ make installcheck
 ### Docker Tests
 
 ```bash
-cd testing/scripts
-./docker-test.sh
+# From project root
+./testing/scripts/docker-test.sh
 ```
 
 ### RAG Integration

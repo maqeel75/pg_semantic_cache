@@ -3,7 +3,8 @@
 
 set -e
 
-cd "$(dirname "$0")/.."
+# Navigate to testing/docker directory
+cd "$(dirname "$0")/../docker"
 
 echo "========================================="
 echo "Starting pgEdge RAG Server Test Environment"

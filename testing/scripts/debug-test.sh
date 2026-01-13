@@ -1,8 +1,17 @@
 #!/bin/bash
+# Debug test script for Docker
+# Must be run from project root
+
 set -e
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$PROJECT_ROOT"
+
 echo "Building Docker image..."
-docker build -q -f Dockerfile.test -t pg_semantic_cache:test .
+docker build -q -f testing/docker/Dockerfile.test -t pg_semantic_cache:test .
 
 echo "Running debug test..."
 docker run --rm pg_semantic_cache:test bash -c '
