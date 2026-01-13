@@ -127,17 +127,6 @@ PostgreSQL is an open-source relational database management system...
 💰 Saved API call! (4.3s faster)
 ```
 
-## Test Files
-
-### `test_probes.sql`
-Tests IVFFlat probe settings and cache performance.
-
-### `test_jsonb_fix.sql`
-Validates JSONB handling with special characters.
-
-### `test_pg_versions.sh`
-Tests compatibility across PostgreSQL 14-18.
-
 ## Environment Variables
 
 Create a `.env` file based on `.env.example`:
