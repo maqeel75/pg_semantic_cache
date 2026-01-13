@@ -1,0 +1,59 @@
+FROM ubuntu:22.04
+
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies and setup pgedge repository
+RUN apt-get update && \
+    apt-get install -y sudo vim wget curl lsb-release gnupg2 build-essential git ca-certificates && \
+    curl -sSL https://apt.pgedge.com/repodeb/pgedge-release_latest_all.deb -o /tmp/pgedge-release.deb && \
+    dpkg -i /tmp/pgedge-release.deb && \
+    rm -f /tmp/pgedge-release.deb && \
+    apt-get update
+
+# Install PostgreSQL 18 and pgvector from pgedge
+RUN apt-get install -y \
+    pgedge-postgresql-18 \
+    pgedge-postgresql-18-pgvector \
+    pgedge-postgresql-server-dev-18
+
+# Set environment variables
+ENV PG_HOME="/usr/lib/postgresql/18"
+ENV PATH="${PG_HOME}/bin:/usr/bin:${PATH}"
+ENV PGDATA="/var/lib/postgresql/data"
+
+# Clone and build pg_semantic_cache extension (keep default 1536 dimensions for OpenAI)
+WORKDIR /tmp
+ARG GIT_USERNAME
+ARG GIT_TOKEN
+RUN if [ -n "$GIT_USERNAME" ] && [ -n "$GIT_TOKEN" ]; then \
+        git clone https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/maqeel75/pg_semantic_cache.git; \
+    else \
+        git clone https://github.com/maqeel75/pg_semantic_cache.git; \
+    fi && \
+    cd pg_semantic_cache && \
+    make && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/pg_semantic_cache
+
+# Create data directory (postgres user already exists from package installation)
+RUN mkdir -p /var/lib/postgresql/data && \
+    chown -R postgres:postgres /var/lib/postgresql
+
+# Copy setup script and entrypoint as root
+COPY setup_openai.sql /tmp/setup.sql
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chown postgres:postgres /tmp/setup.sql && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    chown postgres:postgres /usr/local/bin/docker-entrypoint.sh
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# Switch to postgres user for running the server
+USER postgres
+WORKDIR /var/lib/postgresql
+
+# Use entrypoint script that initializes DB on first run
+CMD ["/usr/local/bin/docker-entrypoint.sh"]
