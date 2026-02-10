@@ -377,8 +377,56 @@ cache_stats(PG_FUNCTION_ARGS)
 	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* Stub functions */
-Datum invalidate_cache(PG_FUNCTION_ARGS) { PG_RETURN_INT64(0); }
+/* Invalidate cache entries by pattern (on query_text) or tag */
+Datum
+invalidate_cache(PG_FUNCTION_ARGS)
+{
+	text *pattern_text = PG_ARGISNULL(0) ? NULL : PG_GETARG_TEXT_PP(0);
+	text *tag_text = PG_ARGISNULL(1) ? NULL : PG_GETARG_TEXT_PP(1);
+	int64 deleted = 0;
+
+	if (pattern_text == NULL && tag_text == NULL)
+		PG_RETURN_INT64(0);
+
+	SPI_connect();
+
+	if (tag_text != NULL)
+	{
+		Oid argtypes[1] = { TEXTOID };
+		Datum argvals[1];
+		StringInfoData buf;
+
+		argvals[0] = PointerGetDatum(tag_text);
+
+		initStringInfo(&buf);
+		appendStringInfoString(&buf,
+			"DELETE FROM semantic_cache.cache_entries WHERE tags @> ARRAY[$1::text]");
+		SPI_execute_with_args(buf.data, 1, argtypes, argvals, NULL, false, 0);
+		deleted += SPI_processed;
+		pfree(buf.data);
+	}
+
+	if (pattern_text != NULL)
+	{
+		Oid argtypes[1] = { TEXTOID };
+		Datum argvals[1];
+		StringInfoData buf;
+
+		argvals[0] = PointerGetDatum(pattern_text);
+
+		initStringInfo(&buf);
+		appendStringInfoString(&buf,
+			"DELETE FROM semantic_cache.cache_entries WHERE query_text LIKE $1");
+		SPI_execute_with_args(buf.data, 1, argtypes, argvals, NULL, false, 0);
+		deleted += SPI_processed;
+		pfree(buf.data);
+	}
+
+	SPI_finish();
+
+	PG_RETURN_INT64(deleted);
+}
+
 Datum cache_hit_rate(PG_FUNCTION_ARGS) { PG_RETURN_FLOAT4(0.0); }
 
 /* Evict expired entries */
