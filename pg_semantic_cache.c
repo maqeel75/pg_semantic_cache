@@ -876,25 +876,13 @@ rebuild_index(PG_FUNCTION_ARGS)
 	/* Drop existing index */
 	execute_sql("DROP INDEX IF EXISTS semantic_cache.idx_cache_embedding");
 
-	/* Recreate table with new dimension */
-	execute_sql("DROP TABLE IF EXISTS semantic_cache.cache_entries CASCADE");
+	/* Clear all entries and alter column to new dimension */
+	execute_sql("TRUNCATE semantic_cache.cache_entries");
 
 	initStringInfo(&buf);
 	appendStringInfo(&buf,
-		"CREATE TABLE semantic_cache.cache_entries ("
-		"  id BIGSERIAL PRIMARY KEY,"
-		"  query_hash TEXT NOT NULL UNIQUE,"
-		"  query_text TEXT NOT NULL,"
-		"  query_embedding vector(%d),"
-		"  result_data JSONB NOT NULL,"
-		"  result_size_bytes INTEGER,"
-		"  created_at TIMESTAMPTZ DEFAULT NOW(),"
-		"  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),"
-		"  access_count INTEGER DEFAULT 0,"
-		"  ttl_seconds INTEGER,"
-		"  expires_at TIMESTAMPTZ,"
-		"  tags TEXT[]"
-		")",
+		"ALTER TABLE semantic_cache.cache_entries "
+		"  ALTER COLUMN query_embedding TYPE vector(%d)",
 		dimension);
 
 	execute_sql(buf.data);
