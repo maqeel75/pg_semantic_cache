@@ -1,56 +1,32 @@
--- pg_semantic_cache verification test
+-- pg_semantic_cache comprehensive feature test
 -- Covers: dimension changes, rebuild_index(), semantic similarity (hit/miss),
 -- tags, invalidate_cache(), eviction strategies, monitoring views,
 -- cost tracking, HNSW index switching, and clear_cache().
+
 -- Setup: create extensions
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_semantic_cache;
+
 -- ============================================================================
 -- Test 1: Initial cache stats (empty cache)
 -- ============================================================================
 SELECT total_entries, total_hits, total_misses, hit_rate_percent
 FROM semantic_cache.cache_stats();
- total_entries | total_hits | total_misses | hit_rate_percent 
----------------+------------+--------------+------------------
-             0 |          0 |            0 |                0
-(1 row)
 
 -- ============================================================================
 -- Test 2: Configure for small vectors (8 dimensions) using rebuild_index()
 -- ============================================================================
 SELECT semantic_cache.set_vector_dimension(8);
-NOTICE:  Vector dimension set to 8. Call rebuild_index() to apply changes.
- set_vector_dimension 
-----------------------
- 
-(1 row)
-
 SELECT semantic_cache.rebuild_index();
-NOTICE:  ivfflat index created with little data
-DETAIL:  This will cause low recall.
-HINT:  Drop the index until the table has more data.
-NOTICE:  Index rebuilt successfully with dimension=8, type=ivfflat
- rebuild_index 
----------------
- 
-(1 row)
 
 -- Verify dimension was applied
 SELECT semantic_cache.get_vector_dimension() AS dimension;
- dimension 
------------
-         8
-(1 row)
-
 SELECT semantic_cache.get_index_type() AS index_type;
- index_type 
-------------
- ivfflat
-(1 row)
 
 -- ============================================================================
 -- Test 3: Cache three query results with 8-dim embeddings
 -- ============================================================================
+
 -- Transactions entry
 SELECT semantic_cache.cache_query(
     'How does PostgreSQL handle transactions?',
@@ -59,10 +35,6 @@ SELECT semantic_cache.cache_query(
     7200,
     ARRAY['postgres', 'concepts']
 ) > 0 AS inserted_transactions;
- inserted_transactions 
------------------------
- t
-(1 row)
 
 -- Indexing entry
 SELECT semantic_cache.cache_query(
@@ -72,10 +44,6 @@ SELECT semantic_cache.cache_query(
     7200,
     ARRAY['postgres', 'indexing']
 ) > 0 AS inserted_indexing;
- inserted_indexing 
--------------------
- t
-(1 row)
 
 -- Replication entry
 SELECT semantic_cache.cache_query(
@@ -85,18 +53,10 @@ SELECT semantic_cache.cache_query(
     7200,
     ARRAY['postgres', 'replication']
 ) > 0 AS inserted_replication;
- inserted_replication 
-----------------------
- t
-(1 row)
 
 -- Verify 3 entries cached
 SELECT total_entries, total_hits, total_misses
 FROM semantic_cache.cache_stats();
- total_entries | total_hits | total_misses 
----------------+------------+--------------
-             3 |          0 |            0
-(1 row)
 
 -- ============================================================================
 -- Test 4: Semantic similarity lookup - cache HIT
@@ -110,10 +70,6 @@ FROM semantic_cache.get_cached_result(
     '[0.13, 0.83, 0.46, 0.29, 0.65, 0.24, 0.89, 0.17]',
     0.95
 );
- found |                         answer                         | high_similarity 
--------+--------------------------------------------------------+-----------------
- t     | PostgreSQL implements MVCC for transaction management. | t
-(1 row)
 
 -- ============================================================================
 -- Test 5: Semantic similarity lookup - cache MISS
@@ -127,24 +83,17 @@ FROM semantic_cache.get_cached_result(
     '[0.95, 0.05, 0.10, 0.02, 0.88, 0.03, 0.50, 0.40]',
     0.95
 );
- found | no_result | below_threshold 
--------+-----------+-----------------
- f     | t         | t
-(1 row)
 
 -- ============================================================================
 -- Test 6: Stats after lookups (1 hit, 1 miss, 50% rate)
 -- ============================================================================
 SELECT total_entries, total_hits, total_misses, hit_rate_percent
 FROM semantic_cache.cache_stats();
- total_entries | total_hits | total_misses | hit_rate_percent 
----------------+------------+--------------+------------------
-             3 |          1 |            1 |               50
-(1 row)
 
 -- ============================================================================
 -- Test 7: Tags - add entries with different tags
 -- ============================================================================
+
 -- Weather entry
 SELECT semantic_cache.cache_query(
     'What is the weather in New York?',
@@ -153,10 +102,6 @@ SELECT semantic_cache.cache_query(
     1800,
     ARRAY['weather', 'location-ny']
 ) > 0 AS inserted_weather;
- inserted_weather 
-------------------
- t
-(1 row)
 
 -- Docker entry
 SELECT semantic_cache.cache_query(
@@ -166,101 +111,44 @@ SELECT semantic_cache.cache_query(
     86400,
     ARRAY['devops', 'docker']
 ) > 0 AS inserted_docker;
- inserted_docker 
------------------
- t
-(1 row)
 
 -- Verify tags exist via cache_by_tag view
 SELECT tag, entry_count FROM semantic_cache.cache_by_tag ORDER BY tag;
-     tag     | entry_count 
--------------+-------------
- concepts    |           1
- devops      |           1
- docker      |           1
- indexing    |           1
- location-ny |           1
- postgres    |           3
- replication |           1
- weather     |           1
-(8 rows)
 
 -- ============================================================================
 -- Test 8: Invalidate by tag
 -- ============================================================================
 SELECT semantic_cache.invalidate_cache(tag := 'weather') AS invalidated_by_tag;
- invalidated_by_tag 
---------------------
-                  1
-(1 row)
 
 SELECT total_entries FROM semantic_cache.cache_stats();
- total_entries 
----------------
-             4
-(1 row)
 
 -- ============================================================================
 -- Test 9: Invalidate by pattern
 -- ============================================================================
 SELECT semantic_cache.invalidate_cache(pattern := '%Docker%') AS invalidated_by_pattern;
- invalidated_by_pattern 
-------------------------
-                      1
-(1 row)
 
 SELECT total_entries FROM semantic_cache.cache_stats();
- total_entries 
----------------
-             3
-(1 row)
 
 -- ============================================================================
 -- Test 10: Eviction strategies
 -- ============================================================================
 SELECT semantic_cache.evict_expired() AS expired_evicted;
- expired_evicted 
------------------
-               0
-(1 row)
-
 SELECT semantic_cache.evict_lru(1000) AS lru_evicted;
- lru_evicted 
--------------
-           0
-(1 row)
-
 SELECT semantic_cache.evict_lfu(1000) AS lfu_evicted;
- lfu_evicted 
--------------
-           0
-(1 row)
-
 SELECT semantic_cache.auto_evict() AS auto_evicted;
- auto_evicted 
---------------
-            0
-(1 row)
 
 -- ============================================================================
 -- Test 11: Monitoring views return data
 -- ============================================================================
+
 -- cache_health view
 SELECT
     total_entries >= 0 AS health_works,
     hit_rate_pct IS NOT NULL AS has_hit_rate
 FROM semantic_cache.cache_health;
- health_works | has_hit_rate 
---------------+--------------
- t            | t
-(1 row)
 
 -- recent_cache_activity view
 SELECT COUNT(*) >= 0 AS activity_works FROM semantic_cache.recent_cache_activity;
- activity_works 
-----------------
- t
-(1 row)
 
 -- ============================================================================
 -- Test 12: Cost tracking with log_cache_access
@@ -271,10 +159,6 @@ SELECT semantic_cache.log_cache_access(
     0.9991,
     0.03
 );
- log_cache_access 
-------------------
- 
-(1 row)
 
 SELECT semantic_cache.log_cache_access(
     md5('Completely new question about Kubernetes'),
@@ -282,10 +166,6 @@ SELECT semantic_cache.log_cache_access(
     0.68,
     0.03
 );
- log_cache_access 
-------------------
- 
-(1 row)
 
 -- Verify cost savings report
 SELECT
@@ -294,40 +174,17 @@ SELECT
     cache_misses >= 1 AS has_misses,
     total_cost_saved > 0 AS has_savings
 FROM semantic_cache.get_cost_savings(7);
- has_queries | has_hits | has_misses | has_savings 
--------------+----------+------------+-------------
- t           | t        | t          | t
-(1 row)
 
 -- Verify daily view
 SELECT COUNT(*) > 0 AS daily_view_works FROM semantic_cache.cost_savings_daily;
- daily_view_works 
-------------------
- t
-(1 row)
 
 -- ============================================================================
 -- Test 13: Switch to HNSW index using rebuild_index()
 -- ============================================================================
 SELECT semantic_cache.set_index_type('hnsw');
-NOTICE:  Index type set to hnsw. Call rebuild_index() to apply changes.
- set_index_type 
-----------------
- 
-(1 row)
-
 SELECT semantic_cache.rebuild_index();
-NOTICE:  Index rebuilt successfully with dimension=8, type=hnsw
- rebuild_index 
----------------
- 
-(1 row)
 
 SELECT semantic_cache.get_index_type() AS index_type_after_switch;
- index_type_after_switch 
--------------------------
- hnsw
-(1 row)
 
 -- ============================================================================
 -- Test 14: Verify HNSW works (cache + lookup after index switch)
@@ -339,78 +196,30 @@ SELECT semantic_cache.cache_query(
     3600,
     ARRAY['hnsw-test']
 ) > 0 AS hnsw_insert_works;
- hnsw_insert_works 
--------------------
- t
-(1 row)
 
 SELECT found FROM semantic_cache.get_cached_result(
     '[0.51, 0.49, 0.50, 0.50, 0.50, 0.50, 0.50, 0.51]',
     0.95
 );
- found 
--------
- t
-(1 row)
 
 -- ============================================================================
 -- Test 15: Switch back to IVFFlat using rebuild_index()
 -- ============================================================================
 SELECT semantic_cache.set_index_type('ivfflat');
-NOTICE:  Index type set to ivfflat. Call rebuild_index() to apply changes.
- set_index_type 
-----------------
- 
-(1 row)
-
 SELECT semantic_cache.rebuild_index();
-NOTICE:  ivfflat index created with little data
-DETAIL:  This will cause low recall.
-HINT:  Drop the index until the table has more data.
-NOTICE:  Index rebuilt successfully with dimension=8, type=ivfflat
- rebuild_index 
----------------
- 
-(1 row)
 
 SELECT semantic_cache.get_index_type() AS index_type_restored;
- index_type_restored 
----------------------
- ivfflat
-(1 row)
 
 -- ============================================================================
 -- Test 16: Dimension change using rebuild_index()
 -- ============================================================================
 SELECT semantic_cache.set_vector_dimension(768);
-NOTICE:  Vector dimension set to 768. Call rebuild_index() to apply changes.
- set_vector_dimension 
-----------------------
- 
-(1 row)
-
 SELECT semantic_cache.rebuild_index();
-NOTICE:  ivfflat index created with little data
-DETAIL:  This will cause low recall.
-HINT:  Drop the index until the table has more data.
-NOTICE:  Index rebuilt successfully with dimension=768, type=ivfflat
- rebuild_index 
----------------
- 
-(1 row)
 
 SELECT semantic_cache.get_vector_dimension() AS dimension_after_change;
- dimension_after_change 
-------------------------
-                    768
-(1 row)
 
 -- Verify cache was cleared (rebuild_index truncates)
 SELECT total_entries FROM semantic_cache.cache_stats();
- total_entries 
----------------
-             0
-(1 row)
 
 -- ============================================================================
 -- Test 17: Cache works with new dimension (768)
@@ -423,35 +232,19 @@ SELECT semantic_cache.cache_query(
     3600,
     NULL
 ) > 0 AS dim768_insert_works;
- dim768_insert_works 
----------------------
- t
-(1 row)
 
 SELECT found FROM semantic_cache.get_cached_result(
     (SELECT replace(replace(array_agg(0.1::float4)::text, '{', '['), '}', ']')
      FROM generate_series(1, 768)),
     0.95
 );
- found 
--------
- t
-(1 row)
 
 -- ============================================================================
 -- Test 18: Clear cache
 -- ============================================================================
 SELECT semantic_cache.clear_cache() >= 0 AS cleared;
- cleared 
----------
- t
-(1 row)
 
 SELECT total_entries FROM semantic_cache.cache_stats();
- total_entries 
----------------
-             0
-(1 row)
 
 -- ============================================================================
 -- Cleanup
