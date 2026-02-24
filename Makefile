@@ -2,7 +2,7 @@
 # PostgreSQL extension using PGXS
 
 EXTENSION = pg_semantic_cache
-DATA = sql/pg_semantic_cache--0.1.0-beta1.sql sql/pg_semantic_cache--0.1.0-beta2.sql sql/pg_semantic_cache--0.1.0-beta3.sql sql/pg_semantic_cache--0.1.0-beta1--0.1.0-beta2.sql sql/pg_semantic_cache--0.1.0-beta2--0.1.0-beta3.sql
+DATA = sql/pg_semantic_cache--0.1.0-beta1.sql sql/pg_semantic_cache--0.1.0-beta2.sql sql/pg_semantic_cache--0.1.0-beta3.sql sql/pg_semantic_cache--0.1.0-beta4.sql sql/pg_semantic_cache--0.1.0-beta1--0.1.0-beta2.sql sql/pg_semantic_cache--0.1.0-beta2--0.1.0-beta3.sql sql/pg_semantic_cache--0.1.0-beta3--0.1.0-beta4.sql
 MODULES = pg_semantic_cache
 
 # Regression tests

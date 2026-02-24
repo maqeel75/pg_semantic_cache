@@ -2,6 +2,30 @@
 
 All notable changes to pg_semantic_cache will be documented in this file.
 
+## [0.1.0-beta4] - 2026-02-24 - Fix cache_hit_rate() and auto_evict() stubs
+
+### Fixed
+- **`cache_hit_rate()`**: Was a C stub always returning `0.0`. Now implemented as a SQL wrapper over `cache_stats()` returning the real hit rate percentage.
+- **`auto_evict()`**: Was a C stub always returning `0`. Now implemented in PL/pgSQL: reads `eviction_policy` from `cache_config` (`ttl`, `lru`, or `lfu`) and delegates to `evict_expired()`, `evict_lru()`, or `evict_lfu()` accordingly. Always runs `evict_expired()` first regardless of policy.
+
+### Upgrade Instructions
+
+**From version 0.1.0-beta3:**
+```sql
+ALTER EXTENSION pg_semantic_cache UPDATE TO '0.1.0-beta4';
+```
+
+**Fresh installation:**
+```sql
+CREATE EXTENSION pg_semantic_cache;  -- installs 0.1.0-beta4 directly
+```
+
+### Compatibility Notes
+
+No schema changes. Pure SQL function replacements — backward compatible with all existing data and configurations.
+
+---
+
 ## [0.1.0-beta3] - 2026-01-07 - Dynamic IVFFlat Optimization & Configurable Dimensions
 
 ### Fixed
