@@ -27,9 +27,9 @@ WORKDIR /tmp
 ARG GIT_USERNAME
 ARG GIT_TOKEN
 RUN if [ -n "$GIT_USERNAME" ] && [ -n "$GIT_TOKEN" ]; then \
-        git clone https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/maqeel75/pg_semantic_cache.git; \
+        git clone https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/pgedge/pg_semantic_cache.git; \
     else \
-        git clone https://github.com/maqeel75/pg_semantic_cache.git; \
+        git clone https://github.com/pgedge/pg_semantic_cache.git; \
     fi && \
     cd pg_semantic_cache && \
     make && \
