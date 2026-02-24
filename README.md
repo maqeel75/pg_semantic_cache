@@ -735,7 +735,7 @@ This project is licensed under the **PostgreSQL License**.
 
 ## 🏆 Credits
 
-**Created by**: Aqeel - PostgreSQL Infrastructure Engineer
+**Created by**: Muhammad Aqeel - PostgreSQL Infrastructure Engineer
 
 **Built with**:
 - Standard PostgreSQL C API
