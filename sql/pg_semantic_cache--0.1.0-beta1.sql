@@ -1,4 +1,4 @@
--- pg_semantic_cache--0.1.0.sql
+-- pg_semantic_cache--0.1.0-beta1.sql
 -- Extension installation script
 
 -- Require pgvector extension

@@ -2,7 +2,7 @@
 
 All notable changes to pg_semantic_cache will be documented in this file.
 
-## [0.3.0] - 2026-01-07 - Dynamic IVFFlat Optimization & Configurable Dimensions
+## [0.1.0-beta3] - 2026-01-07 - Dynamic IVFFlat Optimization & Configurable Dimensions
 
 ### Fixed
 - **Critical Bug Fix**: Fixed IVFFlat index inconsistently missing semantically similar queries
@@ -54,9 +54,9 @@ All notable changes to pg_semantic_cache will be documented in this file.
 
 ### Upgrade Instructions
 
-**From version 0.2.0:**
+**From version 0.1.0-beta2:**
 ```sql
-ALTER EXTENSION pg_semantic_cache UPDATE TO '0.3.0';
+ALTER EXTENSION pg_semantic_cache UPDATE TO '0.1.0-beta3';
 ```
 
 **Fresh installation:**
@@ -88,7 +88,7 @@ None - all changes are backward compatible. Existing installations will continue
 
 ---
 
-## [0.2.0] - 2024-12-09 - Logging & Cost Tracking Feature
+## [0.1.0-beta2] - 2024-12-09 - Logging & Cost Tracking Feature
 
 ### Added
 - **Cost Tracking System**: Track cache hits/misses with associated API costs
@@ -157,7 +157,7 @@ This fix was applied to:
 
 ### Migration Notes
 
-**From 0.1.0 to 0.2.0**:
+**From 0.1.0-beta1 to 0.1.0-beta2**:
 
 ```sql
 -- Drop and recreate the extension to get new schema
@@ -187,7 +187,7 @@ None - this is a backward-compatible feature addition.
 
 ---
 
-## [0.1.0] - 2024-12-06 - Initial Release
+## [0.1.0-beta1] - 2024-12-06 - Initial Release
 
 ### Added
 - Core semantic caching functionality
@@ -232,7 +232,7 @@ We follow [Semantic Versioning](https://semver.org/):
 
 ## Future Roadmap
 
-### Planned for 0.3.0
+### Planned for 1.0.0
 - Automatic cache warming based on query patterns
 - Smart eviction policies (LRU, frequency-based)
 - Multi-model support (different embedding dimensions)

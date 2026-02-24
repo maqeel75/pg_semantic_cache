@@ -1,5 +1,5 @@
--- pg_semantic_cache--0.1.0--0.2.0.sql
--- Upgrade script from version 0.1.0 to 0.2.0
+-- pg_semantic_cache--0.1.0-beta1--0.1.0-beta2.sql
+-- Upgrade script from version 0.1.0-beta1 to 0.1.0-beta2
 -- Adds logging and cost tracking features
 
 -- Add total_cost_saved column to cache_metadata table

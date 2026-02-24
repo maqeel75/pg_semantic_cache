@@ -338,7 +338,7 @@ done
 # Create RPM spec
 cat > pg_semantic_cache.spec << 'EOF'
 Name: pg_semantic_cache
-Version: 0.1.0
+Version: 0.1.0-beta3
 Release: 1%{?dist}
 Summary: PostgreSQL semantic query cache extension
 License: MIT
@@ -428,7 +428,7 @@ WHERE expires_at <= NOW();
 
 ## Support
 
-- **GitHub**: [your-repo-url]
+- **GitHub**: [https://github.com/pgedge/pg_semantic_cache](https://github.com/pgedge/pg_semantic_cache)
 - **Documentation**: This guide + `README.md`
 - **Examples**: `examples/` directory
 - **Tests**: `test/` directory

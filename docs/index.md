@@ -56,7 +56,7 @@ graph LR
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/pg_semantic_cache.git
+git clone https://github.com/pgedge/pg_semantic_cache.git
 cd pg_semantic_cache
 
 # Build and install
@@ -131,7 +131,7 @@ pg_semantic_cache is implemented in pure C using the PostgreSQL extension API (P
 ## Getting Help
 
 - **Documentation**: Browse the sections in the navigation menu
-- **Issues**: Report bugs at [GitHub Issues](https://github.com/yourusername/pg_semantic_cache/issues)
+- **Issues**: Report bugs at [GitHub Issues](https://github.com/pgedge/pg_semantic_cache/issues)
 - **Examples**: See [Use Cases](use_cases.md) for practical implementations
 - **FAQ**: Check the [FAQ](FAQ.md) for common questions
 

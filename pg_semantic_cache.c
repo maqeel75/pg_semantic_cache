@@ -331,7 +331,7 @@ cache_query(PG_FUNCTION_ARGS)
 /*
  * get_cached_result - REPLACED WITH SQL IMPLEMENTATION
  *
- * This function is now implemented in SQL (see sql/pg_semantic_cache--0.3.0.sql)
+ * This function is now implemented in SQL (see sql/pg_semantic_cache--0.1.0-beta3.sql)
  * for better memory management and simpler maintenance.
  *
  * Benefits of SQL implementation:

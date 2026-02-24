@@ -1,9 +1,9 @@
--- pg_semantic_cache--0.2.0.sql
--- This is a direct installation of version 0.2.0
--- (includes all features from 0.1.0 plus logging and cost tracking)
+-- pg_semantic_cache--0.1.0-beta3.sql
+-- This is a direct installation of version 0.1.0-beta3
+-- (includes all features from 0.1.0-beta2 plus dynamic IVFFlat optimization and configurable dimensions)
 
--- This file is identical to 0.1.0.sql since init_schema() creates all tables
--- The difference is that 0.2.0 includes the new logging functions
+-- This file is identical to 0.1.0-beta2.sql since init_schema() creates all tables
+-- The difference is that 0.1.0-beta3 includes dynamic IVFFlat optimization and configurable dimensions
 
 \echo Use "CREATE EXTENSION pg_semantic_cache" to load this file. \quit
 
@@ -137,10 +137,13 @@ AS $$
     WHERE m.id = 1;
 $$;
 
+-- Note: Implemented in SQL as a convenience wrapper over cache_stats()
 CREATE FUNCTION cache_hit_rate()
 RETURNS float4
-AS 'MODULE_PATHNAME', 'cache_hit_rate'
-LANGUAGE C STRICT;
+LANGUAGE sql STABLE
+AS $$
+    SELECT hit_rate_percent FROM semantic_cache.cache_stats();
+$$;
 
 CREATE FUNCTION evict_expired()
 RETURNS bigint
@@ -162,10 +165,47 @@ RETURNS bigint
 AS 'MODULE_PATHNAME', 'clear_cache'
 LANGUAGE C STRICT;
 
+-- Note: Implemented in SQL; reads eviction_policy from cache_config and delegates
+--       to evict_expired() (ttl), evict_lru() (lru), or evict_lfu() (lfu)
 CREATE FUNCTION auto_evict()
 RETURNS bigint
-AS 'MODULE_PATHNAME', 'auto_evict'
-LANGUAGE C STRICT;
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    policy      TEXT;
+    total_count BIGINT;
+    keep_count  INTEGER;
+    evicted     BIGINT := 0;
+BEGIN
+    -- Always evict TTL-expired entries first
+    evicted := evicted + semantic_cache.evict_expired();
+
+    -- Read eviction policy from config (default: 'ttl')
+    SELECT value INTO policy
+    FROM semantic_cache.cache_config
+    WHERE key = 'eviction_policy';
+
+    IF policy IS NULL THEN
+        policy := 'ttl';
+    END IF;
+
+    -- For LRU or LFU policies, also evict by usage pattern (keep 80% of remaining)
+    IF policy IN ('lru', 'lfu') THEN
+        SELECT COUNT(*)::BIGINT INTO total_count
+        FROM semantic_cache.cache_entries;
+
+        keep_count := GREATEST((total_count * 0.8)::INTEGER, 0);
+
+        IF policy = 'lru' THEN
+            evicted := evicted + semantic_cache.evict_lru(keep_count);
+        ELSE
+            evicted := evicted + semantic_cache.evict_lfu(keep_count);
+        END IF;
+    END IF;
+
+    RETURN evicted;
+END;
+$$;
 
 CREATE FUNCTION log_cache_access(
     query_hash text DEFAULT NULL,

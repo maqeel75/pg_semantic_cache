@@ -205,7 +205,7 @@ The extension control file (`pg_semantic_cache.control`) defines metadata like v
        // Return with PG_RETURN_TYPE(value)
    }
    ```
-3. Add SQL function declaration to `sql/pg_semantic_cache--0.1.0.sql`
+3. Add SQL function declaration to `sql/pg_semantic_cache--0.1.0-beta3.sql`
 4. Rebuild and reinstall
 
 ### Modifying Schema

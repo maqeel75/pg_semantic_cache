@@ -1,9 +1,9 @@
--- pg_semantic_cache--0.2.0.sql
--- This is a direct installation of version 0.2.0
--- (includes all features from 0.1.0 plus logging and cost tracking)
+-- pg_semantic_cache--0.1.0-beta2.sql
+-- This is a direct installation of version 0.1.0-beta2
+-- (includes all features from 0.1.0-beta1 plus logging and cost tracking)
 
--- This file is identical to 0.1.0.sql since init_schema() creates all tables
--- The difference is that 0.2.0 includes the new logging functions
+-- This file is identical to 0.1.0-beta1.sql since init_schema() creates all tables
+-- The difference is that 0.1.0-beta2 includes the new logging functions
 
 \echo Use "CREATE EXTENSION pg_semantic_cache" to load this file. \quit
 
